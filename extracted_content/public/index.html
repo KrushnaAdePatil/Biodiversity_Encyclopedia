@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BioSphere Encyclopedia — Every living thing on Earth</title>
+  <meta name="description" content="A free multilingual biodiversity encyclopedia: 179 illustrated species profiles across 15 kingdoms of life, with Marathi and Hindi names, IUCN status, galleries, quizzes and an interactive atlas." />
+  <meta name="keywords" content="biodiversity, species encyclopedia, wildlife, birds of india, plants, animals, marathi species names" />
+  <meta name="theme-color" content="#052e16" />
+  <meta property="og:title" content="BioSphere Encyclopedia" />
+  <meta property="og:description" content="Life on Earth, catalogued — 179 species, 15 kingdoms, live photo galleries." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="shortcut icon" href="/icon.svg" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+  <script>
+    // Apply saved preferences before first paint (no theme flash).
+    (function () {
+      try {
+        var p = JSON.parse(localStorage.getItem("biosphere-prefs") || "{}");
+        var dark = p.theme ? p.theme === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (dark) document.documentElement.setAttribute("data-theme", "dark");
+        if (p.contrast) document.documentElement.classList.add("contrast");
+        if (p.fontScale) document.documentElement.style.fontSize = (16 * p.fontScale) + "px";
+      } catch (e) {}
+    })();
+  </script>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "BioSphere Encyclopedia",
+      "url": "/",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "#/explore?q={query}",
+        "query-input": "required name=query"
+      }
+    }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#app">Skip to content</a>
+
+  <header class="site-header" id="site-header">
+    <div class="header-inner container">
+      <a href="#/" class="brand" aria-label="BioSphere Encyclopedia home">
+        <img src="/icon.svg" alt="" class="brand-mark" />
+        <span class="brand-text">
+          <span class="brand-name">Bio<span class="brand-accent">Sphere</span></span>
+          <span class="brand-sub">Encyclopedia</span>
+        </span>
+      </a>
+
+      <nav class="top-nav" aria-label="Primary">
+        <div class="nav-item has-mega">
+          <button class="nav-link" id="mega-btn" aria-expanded="false">Categories ▾</button>
+          <div class="mega-menu" id="mega-menu" hidden></div>
+        </div>
+        <a class="nav-link" href="#/explore">Explore</a>
+        <a class="nav-link" href="#/map">Atlas</a>
+        <a class="nav-link" href="#/compare">Compare</a>
+        <a class="nav-link" href="#/quiz">Quiz</a>
+      </nav>
+
+      <div class="search-wrap" role="search">
+        <form id="search-form" autocomplete="off">
+          <span class="search-icon" aria-hidden="true">🔍</span>
+          <input id="search-input" type="search" placeholder="Search species, scientific names, habitats…" aria-label="Search species" />
+          <button type="button" id="voice-btn" class="icon-btn voice-btn" title="Voice search" aria-label="Voice search">🎙️</button>
+          <button type="submit" class="btn btn-primary btn-sm search-go">Go</button>
+        </form>
+        <ul id="suggest-box" class="suggest-box" hidden></ul>
+      </div>
+
+      <div class="header-actions">
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button data-lang="en" class="lang-btn active" type="button">EN</button>
+          <button data-lang="mr" class="lang-btn" type="button">मराठी</button>
+          <button data-lang="hi" class="lang-btn" type="button">हिंदी</button>
+        </div>
+        <button id="a11y-btn" class="icon-btn" title="Accessibility" aria-label="Accessibility">♿</button>
+        <div id="a11y-pop" class="a11y-pop" hidden>
+          <p class="a11y-title">Text size</p>
+          <div class="font-scales">
+            <button data-scale="0.9" type="button">90%</button>
+            <button data-scale="1" class="active" type="button">100%</button>
+            <button data-scale="1.15" type="button">115%</button>
+            <button data-scale="1.3" type="button">130%</button>
+          </div>
+          <label class="contrast-row">
+            <span>High contrast</span>
+            <input id="contrast-toggle" type="checkbox" />
+          </label>
+        </div>
+        <button id="theme-btn" class="icon-btn" title="Dark mode" aria-label="Toggle dark mode">🌙</button>
+        <button id="menu-btn" class="icon-btn menu-btn" title="Menu" aria-label="Menu">☰</button>
+      </div>
+    </div>
+
+    <div class="mobile-search container">
+      <div class="search-wrap">
+        <form id="search-form-m" autocomplete="off">
+          <span class="search-icon">🔍</span>
+          <input id="search-input-m" type="search" placeholder="Search species…" aria-label="Search species mobile" />
+          <button type="submit" class="btn btn-primary btn-sm search-go">Go</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="mobile-menu" class="mobile-menu container" hidden>
+      <a class="mm-link" href="#/explore">🔎 Explore</a>
+      <a class="mm-link" href="#/map">🗺️ Atlas</a>
+      <a class="mm-link" href="#/compare">⚖️ Compare</a>
+      <a class="mm-link" href="#/quiz">🧠 Quiz</a>
+      <a class="mm-link" href="#/checklist">✅ Life list</a>
+      <a class="mm-link" href="#/contribute">🌱 Contribute</a>
+      <a class="mm-link" href="#/glossary">📖 Glossary</a>
+      <a class="mm-link" href="#/about">ℹ️ About</a>
+      <div id="mobile-cats" class="mm-cats"></div>
+    </div>
+  </header>
+
+  <main id="app" tabindex="-1">
+    <div class="container page-loading">
+      <div class="skeleton sk-hero"></div>
+      <div class="grid grid-4">
+        <div class="skeleton sk-card"></div>
+        <div class="skeleton sk-card"></div>
+        <div class="skeleton sk-card"></div>
+        <div class="skeleton sk-card"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="footer-logo-row">
+            <img src="/icon.svg" alt="" class="footer-mark" />
+            <div>
+              <p class="footer-name">BioSphere Encyclopedia</p>
+              <p class="footer-tag">Life on Earth, catalogued</p>
+            </div>
+          </div>
+          <p class="footer-blurb">
+            A free, multilingual encyclopedia of living things — plain HTML, CSS and JavaScript on
+            the front, a Python + PostgreSQL backend behind it.
+          </p>
+        </div>
+        <div class="footer-col" id="footer-cats">
+          <p class="footer-title">Kingdoms</p>
+        </div>
+        <div class="footer-col">
+          <p class="footer-title">Tools</p>
+          <a href="#/explore">Advanced explorer</a>
+          <a href="#/compare">Species comparison</a>
+          <a href="#/map">Interactive atlas</a>
+          <a href="#/quiz">Identification quiz</a>
+          <a href="#/checklist">My life list</a>
+        </div>
+        <div class="footer-col">
+          <p class="footer-title">Learn</p>
+          <a href="#/about">About the project</a>
+          <a href="#/contribute">Contribute a species</a>
+          <a href="#/glossary">Glossary of terms</a>
+          <a href="#/faq">FAQ</a>
+          <a href="#/privacy">Privacy & terms</a>
+        </div>
+      </div>
+      <div class="footer-sources">
+        <span class="footer-sources-title">Data partners & sources</span>
+        <div class="source-chips">
+          <a href="https://www.gbif.org" target="_blank" rel="noreferrer noopener">GBIF</a>
+          <a href="https://www.iucnredlist.org" target="_blank" rel="noreferrer noopener">IUCN Red List</a>
+          <a href="https://www.inaturalist.org" target="_blank" rel="noreferrer noopener">iNaturalist</a>
+          <a href="https://eol.org" target="_blank" rel="noreferrer noopener">Encyclopedia of Life</a>
+          <a href="https://commons.wikimedia.org" target="_blank" rel="noreferrer noopener">Wikimedia Commons</a>
+          <a href="https://www.fishbase.se" target="_blank" rel="noreferrer noopener">FishBase</a>
+          <a href="https://www.marinespecies.org" target="_blank" rel="noreferrer noopener">WoRMS</a>
+        </div>
+      </div>
+      <p class="footer-copy" id="footer-copy"></p>
+    </div>
+  </footer>
+
+  <script src="/assets/js/app.js" defer></script>
+</body>
+</html>
