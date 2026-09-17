@@ -47,3 +47,42 @@ CARD_COLUMNS = (
 
 _media_cache: dict[str, tuple[float, Any]] = {}
 MEDIA_TTL = 60 * 60 * 12
+
+
+# ----------------------------------------------------------------------------- db
+def db() -> Any:
+    return psycopg.connect(DATABASE_URL, autocommit=True)
+
+
+def _clean(value: Any) -> Any:
+    import datetime as _dt
+    import decimal as _dec
+
+    if isinstance(value, (_dt.datetime, _dt.date)):
+        return value.isoformat()
+    if isinstance(value, _dec.Decimal):
+        return float(value)
+    return value
+
+
+def fetch_all(query: str, params: tuple = ()) -> list[dict]:
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(query, params)
+        cols = [d.name for d in cur.description]
+        return [{k: _clean(v) for k, v in zip(cols, row)} for row in cur.fetchall()]
+
+
+def fetch_one(query: str, params: tuple = ()) -> dict | None:
+    rows = fetch_all(query, params)
+    return rows[0] if rows else None
+
+
+# ----------------------------------------------------------------------------- helpers
+def _csv(value: str | None) -> list[str]:
+    return [v for v in (value or "").split(",") if v]
+
+
+def json_response(payload: Any, seconds: int = 300) -> JSONResponse:
+    resp = JSONResponse(payload)
+    resp.headers["Cache-Control"] = f"public, max-age={seconds}, stale-while-revalidate=3600"
+    return resp
