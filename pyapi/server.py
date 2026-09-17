@@ -108,3 +108,63 @@ def stats() -> Any:
         from species"""
     )
     return json_response(row[0] if row else {}, 600)
+
+
+# ----------------------------------------------------------------------------- taxonomy
+@app.get("/categories")
+def categories() -> Any:
+    cats = fetch_all("select * from categories order by sort_order")
+    counts = fetch_all(
+        "select category_slug as slug, count(*) as n from species group by category_slug"
+    )
+    mapping = {c["slug"]: c["n"] for c in counts}
+    for cat in cats:
+        cat["species_count"] = mapping.get(cat["slug"], 0)
+    return json_response(cats, 3600)
+
+
+@app.get("/subcategories")
+def subcategories(category: str | None = None) -> Any:
+    if category:
+        rows = fetch_all(
+            "select * from subcategories where category_slug = %s order by sort_order",
+            (category,),
+        )
+        counts = fetch_all(
+            "select subcategory_slug as slug, count(*) as n from species where category_slug = %s group by subcategory_slug",
+            (category,),
+        )
+    else:
+        rows = fetch_all("select * from subcategories order by sort_order")
+        counts = fetch_all(
+            "select subcategory_slug as slug, count(*) as n from species group by subcategory_slug"
+        )
+    mapping = {c["slug"]: c["n"] for c in counts}
+    for row in rows:
+        row["species_count"] = mapping.get(row["slug"], 0)
+    return json_response(rows, 3600)
+
+
+@app.get("/facets")
+def facets() -> Any:
+    return json_response(
+        {
+            "habitats": fetch_all(
+                "select h as value, count(*) as count from species, unnest(habitats) h group by h order by count desc"
+            ),
+            "diets": fetch_all(
+                "select diet_type as value, count(*) as count from species group by diet_type order by count desc"
+            ),
+            "conservation": [
+                {**row, "label": CONSERVATION.get(row["value"], (row["value"], ""))[0]}
+                for row in fetch_all(
+                    "select conservation as value, count(*) as count from species group by conservation order by count desc"
+                )
+            ],
+            "continents": fetch_all(
+                "select c as value, count(*) as count from species, unnest(continents) c group by c order by count desc"
+            ),
+            "legend": {k: {"label": v[0], "color": v[1]} for k, v in CONSERVATION.items()},
+        },
+        3600,
+    )
