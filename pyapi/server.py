@@ -86,3 +86,25 @@ def json_response(payload: Any, seconds: int = 300) -> JSONResponse:
     resp = JSONResponse(payload)
     resp.headers["Cache-Control"] = f"public, max-age={seconds}, stale-while-revalidate=3600"
     return resp
+
+
+# ----------------------------------------------------------------------------- health
+@app.get("/ping")
+def ping() -> dict:
+    return {"ok": True, "backend": "python", "framework": "fastapi"}
+
+
+# ----------------------------------------------------------------------------- stats
+@app.get("/stats")
+def stats() -> Any:
+    row = fetch_all(
+        """
+        select count(*) as total,
+          count(*) filter (where conservation in ('CR','EN','VU')) as threatened,
+          count(*) filter (where conservation = 'EX') as extinct,
+          (select count(*) from categories) as categories,
+          (select count(distinct c) from species, unnest(countries) as c) as countries,
+          (select count(*) from sightings) as sightings
+        from species"""
+    )
+    return json_response(row[0] if row else {}, 600)
