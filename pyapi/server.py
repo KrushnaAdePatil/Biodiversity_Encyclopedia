@@ -168,3 +168,108 @@ def facets() -> Any:
         },
         3600,
     )
+
+
+# ----------------------------------------------------------------------------- species list
+def _where(filters: dict) -> tuple[str, list]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if filters.get("q"):
+        params.append(f"%{filters['q'].lower()}%")
+        t = filters["q"]
+        clauses.append(
+            "(lower(common_name) like %s or lower(scientific_name) like %s or name_mr like %s"
+            " or name_hi like %s or lower(summary) like %s or lower(array_to_string(tags,' ')) like %s)"
+        )
+        params.extend([f"%{t.lower()}%"] * 5)
+    if filters.get("category"):
+        clauses.append("category_slug = %s")
+        params.append(filters["category"])
+    if filters.get("sub"):
+        clauses.append("subcategory_slug = %s")
+        params.append(filters["sub"])
+    if filters.get("conservation"):
+        clauses.append("conservation = any(%s)")
+        params.append(_csv(filters["conservation"]))
+    if filters.get("diet"):
+        clauses.append("diet_type = any(%s)")
+        params.append(_csv(filters["diet"]))
+    if filters.get("habitat"):
+        clauses.append("habitats && %s")
+        params.append(_csv(filters["habitat"]))
+    if filters.get("continent"):
+        clauses.append("continents && %s")
+        params.append(_csv(filters["continent"]))
+    if filters.get("tag"):
+        clauses.append("tags && %s")
+        params.append([filters["tag"]])
+    if filters.get("letter"):
+        clauses.append("upper(left(common_name,1)) = %s")
+        params.append(filters["letter"].upper())
+    return (" where " + " and ".join(clauses), params) if clauses else ("", params)
+
+
+_ORDER = {
+    "az": "common_name asc",
+    "za": "common_name desc",
+    "largest": "length_cm desc",
+    "smallest": "length_cm asc",
+    "longest-lived": "lifespan_wild desc",
+    "rarest": (
+        "case conservation when 'EX' then 0 when 'EW' then 1 when 'CR' then 2 when 'EN' then 3"
+        " when 'VU' then 4 when 'NT' then 5 when 'LC' then 6 else 7 end asc"
+    ),
+    "popular": "popularity desc",
+}
+
+
+@app.get("/species")
+def species_list(request: Request) -> Any:
+    q = dict(request.query_params)
+    page = max(1, int(q.get("page", 1) or 1))
+    per_page = min(200, max(6, int(q.get("perPage", 24) or 24)))
+    where, params = _where(q)
+    order = _ORDER.get(q.get("sort") or "popular", "popularity desc")
+    params.extend([per_page, (page - 1) * per_page])
+    items = fetch_all(
+        f"select {CARD_COLUMNS} from species{where} order by {order}, common_name asc limit %s offset %s",
+        tuple(params),
+    )
+    total = fetch_one(f"select count(*) as n from species{where}", tuple(params[:-2])) or {"n": 0}
+    return json_response({"items": items, "total": total["n"], "page": page, "perPage": per_page})
+
+
+@app.get("/species/{slug}")
+def species_one(slug: str) -> Any:
+    row = fetch_one("select * from species where slug = %s", (slug,))
+    if not row:
+        raise HTTPException(status_code=404, detail="species not found")
+    related_slugs = row.get("related_slugs") or []
+    related = fetch_all(
+        f"select {CARD_COLUMNS} from species where slug = any(%s)", (related_slugs,)
+    ) if related_slugs else []
+    if not related:
+        related = fetch_all(
+            f"select {CARD_COLUMNS} from species where category_slug = %s and slug != %s order by popularity desc limit 4",
+            (row["category_slug"], slug),
+        )
+    sightings = fetch_all(
+        "select * from sightings where species_slug = %s order by created_at desc limit 30",
+        (slug,),
+    )
+    return json_response({"species": row, "related": related, "sightings": sightings})
+
+
+@app.get("/suggest")
+def suggest(q: str = Query("")) -> Any:
+    term = q.strip().lower()
+    if len(term) < 2:
+        return json_response({"items": []})
+    rows = fetch_all(
+        "select slug, common_name, scientific_name, name_mr, name_hi, emoji, category_slug"
+        " from species where lower(common_name) like %s or lower(scientific_name) like %s"
+        " or name_mr like %s or name_hi like %s or lower(array_to_string(tags,' ')) like %s"
+        " order by popularity desc limit 8",
+        (f"%{term}%",) * 5,
+    )
+    return json_response({"items": rows})
