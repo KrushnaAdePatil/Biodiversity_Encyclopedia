@@ -273,3 +273,79 @@ def suggest(q: str = Query("")) -> Any:
         (f"%{term}%",) * 5,
     )
     return json_response({"items": rows})
+
+
+# ----------------------------------------------------------------------------- featured
+@app.get("/day")
+def day() -> Any:
+    total = fetch_one("select count(*) as n from species") or {"n": 0}
+    if not total["n"]:
+        return json_response({})
+    offset = int(time.time() // 86400) % total["n"]
+    row = fetch_one("select * from species order by slug asc limit 1 offset %s", (offset,))
+    return json_response({"species": row}, 300)
+
+
+@app.get("/trending")
+def trending() -> Any:
+    return json_response(
+        {"items": fetch_all(f"select {CARD_COLUMNS} from species order by popularity desc limit 8")},
+        600,
+    )
+
+
+@app.get("/facts")
+def facts() -> Any:
+    rows = fetch_all(
+        "select slug, common_name, emoji, facts from species where array_length(facts, 1) > 0 order by random() limit 6"
+    )
+    for row in rows:
+        row_facts = row.pop("facts") or [""]
+        row["fact"] = random.choice(row_facts)
+    return json_response({"items": rows})
+
+
+@app.get("/quiz")
+def quiz(count: int = Query(8, ge=3, le=15)) -> Any:
+    pool = fetch_all(
+        "select slug, common_name, scientific_name, emoji, summary, wiki_title, category_slug, facts"
+        " from species order by random() limit %s",
+        (max(40, count * 6),),
+    )
+    questions = []
+    used: set[str] = set()
+    for item in pool:
+        if len(questions) >= count:
+            break
+        distractors = [p for p in pool if p["slug"] not in used and p["slug"] != item["slug"]][:3]
+        if len(distractors) < 3:
+            continue
+        used.add(item["slug"])
+        options = [{"slug": item["slug"], "name": item["common_name"]}] + [
+            {"slug": d["slug"], "name": d["common_name"]} for d in distractors
+        ]
+        random.shuffle(options)
+        questions.append(
+            {
+                "slug": item["slug"],
+                "wikiTitle": item["wiki_title"],
+                "emoji": item["emoji"],
+                "hint": (item["facts"] or [item["summary"]])[0],
+                "scientificName": item["scientific_name"],
+                "answer": item["slug"],
+                "options": options,
+            }
+        )
+    return json_response({"questions": questions})
+
+
+@app.get("/atlas")
+def atlas(region: str = Query("Asia")) -> Any:
+    items = fetch_all(
+        f"select {CARD_COLUMNS} from species where continents && %s order by popularity desc limit 24",
+        ([region],),
+    )
+    counts = fetch_all(
+        "select c as value, count(*) as count from species, unnest(continents) c group by c"
+    )
+    return json_response({"items": items, "counts": counts})
