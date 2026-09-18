@@ -349,3 +349,66 @@ def atlas(region: str = Query("Asia")) -> Any:
         "select c as value, count(*) as count from species, unnest(continents) c group by c"
     )
     return json_response({"items": items, "counts": counts})
+
+
+# ----------------------------------------------------------------------------- community
+class SightingIn(BaseModel):
+    speciesSlug: str
+    observer: str
+    location: str | None = ""
+    note: str | None = ""
+    rating: int | None = 5
+    seen: bool | None = True
+
+
+class ContributionIn(BaseModel):
+    commonName: str
+    scientificName: str | None = ""
+    categorySlug: str | None = ""
+    region: str | None = ""
+    details: str | None = ""
+    contributor: str | None = "Anonymous"
+    email: str | None = ""
+
+
+@app.post("/sightings", status_code=201)
+def sighting_post(data: SightingIn) -> Any:
+    if not data.speciesSlug.strip() or not data.observer.strip():
+        raise HTTPException(status_code=400, detail="speciesSlug and observer are required")
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into sightings (species_slug, observer, location, note, rating, seen)"
+            " values (%s,%s,%s,%s,%s,%s) returning id, created_at",
+            (
+                data.speciesSlug,
+                data.observer[:80],
+                (data.location or "")[:120],
+                (data.note or "")[:1000],
+                min(5, max(1, data.rating or 5)),
+                bool(data.seen),
+            ),
+        )
+        row = cur.fetchone()
+    return json_response({"id": row[0], "created_at": str(row[1])}, 60)
+
+
+@app.post("/contribute", status_code=201)
+def contribute_post(data: ContributionIn) -> Any:
+    if not data.commonName.strip():
+        raise HTTPException(status_code=400, detail="commonName is required")
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into contributions (common_name, scientific_name, category_slug, region,"
+            " details, contributor, email) values (%s,%s,%s,%s,%s,%s,%s) returning id",
+            (
+                data.commonName[:120],
+                (data.scientificName or "")[:160],
+                (data.categorySlug or "")[:60],
+                (data.region or "")[:120],
+                (data.details or "")[:4000],
+                (data.contributor or "Anonymous")[:80],
+                (data.email or "")[:160],
+            ),
+        )
+        row = cur.fetchone()
+    return json_response({"id": row[0]}, 60)
