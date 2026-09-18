@@ -77,6 +77,89 @@ def fetch_one(query: str, params: tuple = ()) -> dict | None:
     return rows[0] if rows else None
 
 
+def ensure_seeded() -> None:
+    """Create tables and seed them from the bundled JSON on an empty database."""
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+        CREATE TABLE IF NOT EXISTS categories (
+          id serial primary key, slug text not null, name text not null,
+          name_mr text default '', name_hi text default '', emoji text default '🌍',
+          tagline text default '', description text default '',
+          accent_from text default '#16a34a', accent_to text default '#0ea5e9',
+          known_species text default '', wiki_title text default '', sort_order integer default 0)"""
+        )
+        cur.execute(
+            """
+        CREATE TABLE IF NOT EXISTS subcategories (
+          id serial primary key, slug text not null, category_slug text not null,
+          name text not null, name_mr text default '', emoji text default '•',
+          blurb text default '', sort_order integer default 0)"""
+        )
+        cur.execute(
+            """
+        CREATE TABLE IF NOT EXISTS species (
+          id serial primary key, slug text not null, common_name text not null,
+          name_mr text default '', name_hi text default '',
+          scientific_name text not null, category_slug text not null,
+          subcategory_slug text default '', emoji text default '🐾',
+          summary text default '', wiki_title text default '',
+          taxonomy jsonb not null, discovery text default '',
+          conservation text default 'LC', population text default 'Not assessed',
+          size_summary text default '', length_cm real default 0, weight_kg real default 0,
+          physical jsonb default '[]', colors text[] default '{}',
+          diet_type text default 'Omnivore', diet_items text[] default '{}',
+          diet_notes text default '', food_chain text default '',
+          lifespan_wild real default 0, lifespan_captive real default 0,
+          lifespan_notes text default '', habitats text[] default '{}',
+          continents text[] default '{}', countries text[] default '{}',
+          climate text default '', altitude text default '', migration text default '',
+          reproduction jsonb default '[]', lifecycle jsonb default '[]',
+          behavior jsonb default '[]', activity text default 'Diurnal',
+          speed text default '', threats text[] default '{}',
+          conservation_notes text default '', how_to_help text default '',
+          facts text[] default '{}', subspecies jsonb default '[]',
+          related_slugs text[] default '{}', tags text[] default '{}',
+          popularity integer default 50,
+          created_at timestamptz default now())"""
+        )
+        cur.execute(
+            """
+        CREATE TABLE IF NOT EXISTS sightings (
+          id serial primary key, species_slug text not null, observer text not null,
+          location text default '', note text default '', rating integer default 5,
+          seen boolean default true, created_at timestamptz default now())"""
+        )
+        cur.execute(
+            """
+        CREATE TABLE IF NOT EXISTS contributions (
+          id serial primary key, common_name text not null,
+          scientific_name text default '', category_slug text default '',
+          region text default '', details text default '',
+          contributor text default 'Anonymous', email text default '',
+          status text default 'pending', created_at timestamptz default now())"""
+        )
+        cur.execute("select count(*) from species")
+        (count,) = cur.fetchone()
+        if count == 0:
+            for table_name in ("categories", "subcategories", "species"):
+                dataset = json.loads((BASE_DIR / "data" / f"{table_name}.json").read_text())
+                for row in dataset:
+                    row.pop("id", None)
+                    row.pop("created_at", None)
+                    cols = ", ".join(row.keys())
+                    holder = ", ".join(f"%({k})s" for k in row)
+                    cur.execute(f"insert into {table_name} ({cols}) values ({holder})", row)
+
+
+@app.on_event("startup")
+def _startup() -> None:  # noqa: C901
+    try:
+        ensure_seeded()
+    except Exception as exc:  # pragma: no cover - logged for ops
+        print(f"[pyapi] seed check failed: {exc}")
+
+
 # ----------------------------------------------------------------------------- helpers
 def _csv(value: str | None) -> list[str]:
     return [v for v in (value or "").split(",") if v]
