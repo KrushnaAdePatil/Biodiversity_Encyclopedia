@@ -412,3 +412,189 @@ def contribute_post(data: ContributionIn) -> Any:
         )
         row = cur.fetchone()
     return json_response({"id": row[0]}, 60)
+
+
+# ----------------------------------------------------------------------------- media
+def _fetch_json(url: str, retries: int = 3) -> Any:
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.load(resp)
+        except Exception:
+            time.sleep(0.35 * (attempt + 1))
+    return None
+
+
+def _sanitise(src: str | None) -> str | None:
+    if not src:
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(src if src.startswith("http") else f"https:{src}")
+        if parsed.hostname not in ("upload.wikimedia.org", "thumb.wikimedia.org"):
+            return None
+        host = "upload.wikimedia.org"
+        return urllib.parse.urlunsplit(("https", host, parsed.path, "", ""))
+    except Exception:
+        return None
+
+
+def _plain(value: str | None) -> str:
+    if not value:
+        return ""
+    import re
+
+    text = re.sub(r"<[^>]+>", " ", value)
+    return " ".join(text.replace("&amp;", "&").replace("&#39;", "'").split())
+
+
+REJECT = (
+    "logo|icon|symbol|range|distribution|location|map|status|iucn|commons|wiki|question_book|"
+    "padlock|ambox|crystal|nuvola|arrow|flag|signature|audio|speaker|taxobox|cladogram|"
+    "diagram|chart|coin|stamp"
+)
+
+
+@app.get("/gallery")
+def gallery(title: str = Query(""), gallery: int = Query(1)) -> Any:
+    if not title.strip():
+        raise HTTPException(status_code=400, detail="title is required")
+    key = f"{title.lower()}|g{gallery}"
+    now = time.time()
+    if key in _media_cache and now - _media_cache[key][0] < MEDIA_TTL:
+        return json_response(_media_cache[key][1], 3600)
+
+    decoded = urllib.parse.unquote(title.replace("_", " "))
+    encoded = urllib.parse.quote(title.replace(" ", "_"))
+    summary = _fetch_json(f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}")
+    images: list[dict] = []
+    seen: set[str] = set()
+
+    if gallery:
+        params = urllib.parse.urlencode(
+            {
+                "action": "query",
+                "format": "json",
+                "formatversion": "2",
+                "generator": "search",
+                "gsrsearch": decoded,
+                "gsrnamespace": 6,
+                "gsrlimit": 40,
+                "prop": "imageinfo",
+                "iiprop": "url|mime|size|extmetadata",
+                "iiurlwidth": 960,
+                "iiextmetadatafilter": "ImageDescription|ObjectName|Artist|Credit",
+                "origin": "*",
+            }
+        )
+        data = _fetch_json(f"https://commons.wikimedia.org/w/api.php?{params}")
+        import re
+
+        bad = re.compile(REJECT, re.I)
+        for page in (data or {}).get("query", {}).get("pages", []):
+            info = (page.get("imageinfo") or [{}])[0]
+            file_title = page.get("title", "")
+            if bad.search(file_title):
+                continue
+            mime = info.get("mime") or ""
+            if mime and mime.lower() not in ("image/jpeg", "image/png", "image/webp"):
+                continue
+            if (info.get("width") or 999) < 320 or (info.get("height") or 999) < 240:
+                continue
+            original = _sanitise(info.get("url"))
+            if not original or original in seen:
+                continue
+            seen.add(original)
+            meta = info.get("extmetadata") or {}
+            cap = (
+                _plain(((meta.get("ImageDescription") or {}).get("value")))
+                or _plain((meta.get("ObjectName") or {}).get("value"))
+                or file_title.replace("File:", "").rsplit(".", 1)[0].replace("_", " ")
+            )
+            credit = (
+                _plain((meta.get("Artist") or {}).get("value"))
+                or _plain((meta.get("Credit") or {}).get("value"))
+                or "Wikimedia Commons contributor"
+            )
+            src = urllib.parse.quote(original, safe="")
+            images.append(
+                {
+                    "url": f"/py/image?src={src}&w=960",
+                    "originalUrl": f"/py/image?src={src}&w=2200",
+                    "caption": cap,
+                    "credit": credit,
+                }
+            )
+            if len(images) >= 20:
+                break
+
+    thumb = _sanitise(((summary or {}).get("thumbnail") or {}).get("source"))
+    original_s = _sanitise(((summary or {}).get("originalimage") or {}).get("source"))
+    source = original_s or thumb
+    lead = f"/py/image?src={urllib.parse.quote(source, safe='')}&w=960" if source else (
+        images[0]["url"] if images else None
+    )
+    if lead and source:
+        quoted = urllib.parse.quote(source, safe="")
+        if not any(quoted in (img["url"] + img["originalUrl"]) for img in images):
+            images.insert(
+                0,
+                {
+                    "url": lead,
+                    "originalUrl": f"/py/image?src={quoted}&w=2200",
+                    "caption": f"{(summary or {}).get('title', decoded)} — lead photograph",
+                    "credit": "Wikimedia Commons contributor",
+                },
+            )
+    payload = {
+        "title": (summary or {}).get("title", decoded),
+        "lead": lead,
+        "extract": (summary or {}).get("extract", ""),
+        "images": images[:20],
+    }
+    _media_cache[key] = (now, payload)
+    return json_response(payload, 3600)
+
+
+def _fetch_bytes(url: str) -> tuple[bytes, str] | None:
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": UA, "Accept": "image/avif,image/webp,image/jpeg,image/png,*/*"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            content_type = resp.headers.get("Content-Type", "")
+            if "image" not in content_type:
+                return None
+            return resp.read(), content_type
+    except Exception:
+        return None
+
+
+@app.get("/image")
+def image(src: str = Query(""), w: int = Query(960)) -> Response:
+    source = _sanitise(src)
+    if not source:
+        raise HTTPException(status_code=400, detail="invalid source")
+    width = min(2200, max(160, w))
+    wsrv = "https://wsrv.nl/?" + urllib.parse.urlencode(
+        {
+            "url": source,
+            "w": width,
+            "output": "webp",
+            "q": 88 if width > 1400 else 82,
+            "we": 1,
+        }
+    )
+    result = _fetch_bytes(wsrv) or _fetch_bytes(source)
+    if not result:
+        return Response(status_code=404, headers={"Cache-Control": "public, max-age=300"})
+    body, content_type = result
+    return Response(
+        content=body,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "public, max-age=604800, stale-while-revalidate=604800",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
