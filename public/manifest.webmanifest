@@ -1,0 +1,19 @@
+{
+  "name": "BioSphere Encyclopedia",
+  "short_name": "BioSphere",
+  "description": "A multilingual encyclopedia of every living thing on Earth.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07120e",
+  "theme_color": "#16a34a",
+  "orientation": "portrait-primary",
+  "categories": ["education", "reference", "science"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
