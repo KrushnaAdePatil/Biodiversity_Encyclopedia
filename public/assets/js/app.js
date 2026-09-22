@@ -898,3 +898,843 @@ function drawCompare(options, selected, q) {
     (selected.length ?
       '<div class="grid" style="grid-template-columns:repeat(' + selected.length + ",1fr);gap:14px;margin-bottom:18px\">" +
       selected.map(function (s) {
+        return '<div class="panel cmp-card"><div class="sp-img-wrap" data-wiki="' + esc(s.wiki_title || "") + '" data-slug="' + esc(s.slug) + '" data-emoji="' + esc(s.emoji || "") + '" data-alt="' + esc(s.common_name) + '"></div>' +
+          '<div style="padding:12px"><a href="#/species/' + s.slug + '"><b>' + esc(localName(s)) + "</b></a><div style=\"margin-top:6px;display:flex;gap:5px;flex-wrap:wrap\">" + statusBadge(s.conservation, true) + '<span class="pill pill-green">' + esc(s.diet_type) + "</span></div></div></div>";
+      }).join("") + "</div>" +
+      '<div class="panel table-scroll"><table class="cmp-table"><tbody>' +
+      nums.map(function (row) {
+        var max = Math.max.apply(null, selected.map(function (s) { return Number(s[row[1]] || 0); }).concat([1]));
+        return "<tr><th>" + row[0] + "</th>" + selected.map(function (s) {
+          var v = Number(s[row[1]] || 0);
+          return "<td><b>" + (v ? v.toLocaleString() + " " + row[2] : "â€”") + '</b><div class="cmp-bar-track"><div class="cmp-bar" style="width:' + (v / max) * 100 + '%"></div></div></td>';
+        }).join("") + "</tr>";
+      }).join("") +
+      textRows.map(function (row) {
+        return "<tr><th>" + row[0] + "</th>" + selected.map(function (s) { return "<td>" + row[1](s) + "</td>"; }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div>"
+      : '<div class="panel empty-state"><div class="es-emoji">âš–ï¸</div><p>Pick a species to begin comparing.</p></div>') +
+    "</div>";
+
+  $$("#app select[data-slot]").forEach(function (sel) {
+    sel.onchange = function () {
+      var slots = $$("#app select[data-slot]").map(function (x) { return x.value; }).filter(Boolean);
+      var keys = ["a", "b", "c"];
+      var url = "#/compare?" + slots.map(function (v, i) { return keys[i] + "=" + encodeURIComponent(v); }).join("&");
+      location.hash = url;
+    };
+  });
+  $("#cmp-clear").onclick = function () { location.hash = "#/compare"; };
+  lazyImages(app); reveal(app);
+}
+
+/* ------------------------------------------------------------------ quiz */
+function renderQuiz() {
+  setTitle("Identify the species quiz Â· BioSphere");
+  app.innerHTML = '<div class="container page"><div class="quiz-shell"><div class="skeleton" style="height:400px;border-radius:22px"></div></div></div>';
+  api("/quiz?count=8").then(function (d) {
+    var questions = d.questions || [];
+    if (!questions.length) throw new Error("no questions");
+    var state = { i: 0, score: 0, picked: null, hint: false, questions: questions };
+    drawQuiz(state);
+  }).catch(function () {
+    app.innerHTML = '<div class="container page"><div class="panel empty-state quiz-shell"><div class="es-emoji">ðŸ§ </div><p>Could not load the quiz.</p><button class="btn btn-primary" onclick="location.reload()">Retry</button></div></div>';
+  });
+}
+
+function drawQuiz(st) {
+  var qs = st.questions;
+  if (st.i >= qs.length) {
+    var pct = Math.round((st.score / qs.length) * 100);
+    var verdict = pct === 100 ? "Perfect â€” you are a walking field guide!" : pct >= 75 ? "Excellent naturalist instincts." : pct >= 50 ? "Solid effort â€” keep exploring." : "Time for a wander through the encyclopedia!";
+    app.innerHTML = '<div class="container page"><div class="quiz-shell panel" style="padding:40px;text-align:center">' +
+      '<div style="font-size:56px">' + (pct >= 75 ? "ðŸ†" : pct >= 50 ? "ðŸŒ¿" : "ðŸ”") + "</div>" +
+      '<h2 class="section-h" style="font-size:30px">' + st.score + " / " + qs.length + "</h2>" +
+      '<p class="muted">' + verdict + "</p>" +
+      '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px">' +
+      '<button class="btn btn-primary" id="quiz-again">Play again</button><a class="btn btn-ghost" href="#/explore">Browse species</a></div></div></div>';
+    $("#quiz-again").onclick = renderQuiz;
+    return;
+  }
+  var q = qs[st.i];
+  app.innerHTML = '<div class="container page"><div class="quiz-shell panel">' +
+    '<div class="quiz-top"><b>Question ' + (st.i + 1) + " of " + qs.length + "</b><span class=\"muted\">Score: " + st.score + "</span></div>" +
+    '<div class="quiz-progress"><b style="width:' + (st.i / qs.length) * 100 + '%"></b></div>' +
+    '<div class="quiz-img-wrap' + (st.picked ? "" : " blurred") + '" id="quiz-img"></div>' +
+    '<div class="quiz-body">' +
+      (st.hint || st.picked
+        ? '<p class="quiz-hint">ðŸ’¡ ' + esc(q.hint) + (st.picked ? '<span class="sci">' + esc(q.scientificName) + "</span>" : "") + "</p>"
+        : '<button class="section-link" id="quiz-hint" style="background:none;border:0;padding:0">Need a clue?</button>') +
+      '<div class="quiz-opts">' + q.options.map(function (opt) {
+        var cls = "quiz-opt";
+        if (st.picked) {
+          if (opt.slug === q.answer) cls += " correct";
+          else if (opt.slug === st.picked) cls += " wrong";
+        }
+        return '<button class="' + cls + '" data-slug="' + opt.slug + '"' + (st.picked ? " disabled" : "") + ">" + esc(opt.name) + "</button>";
+      }).join("") + "</div>" +
+      (st.picked ? '<div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap"><b>' + (st.picked === q.answer ? "âœ… Correct!" : "âŒ Not quite.") + '</b><a class="section-link" href="#/species/' + q.answer + '">Read the profile</a><button class="btn btn-primary btn-sm" id="quiz-next" style="margin-left:auto">' + (st.i + 1 === qs.length ? "See results" : "Next â†’") + "</button></div>" : "") +
+    "</div></div></div>";
+
+  var imgWrap = $("#quiz-img");
+  if (!st.picked) imgWrap.dataset.mystery = "1";
+  attachImage(imgWrap, q.wikiTitle, q.slug, st.picked ? q.emoji : "â“", "Mystery species");
+
+  if (!st.hint && !st.picked) $("#quiz-hint").onclick = function () { st.hint = true; drawQuiz(st); };
+  $$(".quiz-opt").forEach(function (btn) {
+    btn.onclick = function () {
+      st.picked = btn.dataset.slug;
+      if (st.picked === q.answer) st.score += 1;
+      drawQuiz(st);
+    };
+  });
+  if (st.picked) $("#quiz-next").onclick = function () { st.i += 1; st.picked = null; st.hint = false; drawQuiz(st); };
+}
+
+/* ------------------------------------------------------------------ checklist */
+function renderChecklist() {
+  setTitle("My life list Â· BioSphere");
+  api("/species?perPage=200&sort=az").then(function (d) {
+    var all = d.items || [];
+    var draw = function (query) {
+      var listNow = lifeList();
+      var seen = all.filter(function (s) { return listNow.indexOf(s.slug) > -1; });
+      var qLower = (query || "").toLowerCase();
+      var filtered = qLower ? all.filter(function (s) { return s.common_name.toLowerCase().indexOf(qLower) > -1; }).slice(0, 60) : all.slice(0, 60);
+      var byCat = {};
+      seen.forEach(function (s) { byCat[s.category_slug] = (byCat[s.category_slug] || 0) + 1; });
+      var pct = Math.round((seen.length / Math.max(1, all.length)) * 100);
+      app.innerHTML = '<div class="container page">' +
+        '<p class="eyebrow">Personal tracker</p><h1 class="section-h" style="font-size:clamp(26px,4vw,38px)">My life list</h1>' +
+        '<p class="muted">Tick off everything you have seen in the wild. Stored privately in this browser.</p>' +
+        '<div class="explore-layout"><div>' +
+        '<div class="panel" style="padding:18px;margin-bottom:16px"><div class="life-list-bar"><b>' + seen.length + ' <small style="font-size:14px" class="muted">species logged</small></b><span class="muted">' + pct + "% of the encyclopedia</span></div>" +
+        '<div class="progress"><b style="width:' + Math.max(2, pct) + '%"></b></div></div>' +
+        '<input class="sort-select" id="life-query" style="width:100%;margin-bottom:14px;border-radius:12px" placeholder="Search the encyclopedia to add a speciesâ€¦" value="' + esc(query || "") + '" />' +
+        '<div class="grid grid-2">' + filtered.map(function (s) {
+          var checked = listNow.indexOf(s.slug) > -1;
+          return '<label class="check-row' + (checked ? " checked" : "") + '"><input type="checkbox" data-slug="' + s.slug + '"' + (checked ? " checked" : "") + " /><span>" + s.emoji + "</span><span style=\"flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">" + esc(s.common_name) + "</span>" + statusBadge(s.conservation, true) + "</label>";
+        }).join("") + "</div></div>" +
+        '<aside><div class="panel sidebar-card"><p class="sc-title">Your list by kingdom</p><ul class="sidebar-facts">' +
+        (draw.cats || []).map(function (c) { return '<li><span class="k">' + c.emoji + " " + esc(c.name) + '</span><span class="v">' + (byCat[c.slug] || 0) + "</span></li>"; }).join("") +
+        "</ul></div></aside></div></div>";
+      $("#life-query").oninput = debounce(function () { draw(this.value); }, 250);
+      $$("#app .check-row input").forEach(function (cb) {
+        cb.onchange = function () {
+          var list = lifeList();
+          var slug = cb.dataset.slug;
+          var next = cb.checked ? list.concat([slug]) : list.filter(function (x) { return x !== slug; });
+          try { localStorage.setItem("biosphere-lifelist", JSON.stringify(next)); } catch (e) {}
+          draw($("#life-query").value);
+        };
+      });
+    };
+    apiCached("/categories").then(function (cats) { draw.cats = cats; draw(""); }).catch(function () { draw.cats = []; draw(""); });
+  }).catch(function () {
+    app.innerHTML = '<div class="container page"><div class="panel empty-state"><div class="es-emoji">âœ…</div><p>Could not load the encyclopedia list.</p></div></div>';
+  });
+}
+
+/* ------------------------------------------------------------------ contribute */
+function renderContribute() {
+  setTitle("Contribute a species Â· BioSphere");
+  apiCached("/categories").then(function (cats) {
+    app.innerHTML = '<div class="container page prose" style="max-width:720px">' +
+      '<p class="eyebrow">Community science</p><h1>Contribute to the encyclopedia</h1>' +
+      '<p class="muted">Spotted a species we have not covered? Know the Marathi, Hindi, Tamil or Bengali name for something? Found an error? This form lands in the PostgreSQL editorial queue.</p>' +
+      '<div class="panel" style="padding:22px;margin-top:20px"><form id="contrib-form" class="form-grid">' +
+      '<div class="grid grid-2"><input name="commonName" required placeholder="Common name *" maxlength="120" /><input name="scientificName" placeholder="Scientific name" maxlength="160" /></div>' +
+      '<div class="grid grid-2"><select name="categorySlug">' +
+        '<option value="">Kingdom / group (optional)</option>' + cats.map(function (c) { return '<option value="' + c.slug + '">' + c.emoji + " " + esc(c.name) + "</option>"; }).join("") + "</select>" +
+      '<input name="region" placeholder="Region / where found" maxlength="120" /></div>' +
+      '<textarea name="details" rows="6" placeholder="Describe the species, local-language names, or the correction. Include sources if you have them." maxlength="4000"></textarea>' +
+      '<div class="grid grid-2"><input name="contributor" placeholder="Your name (optional)" maxlength="80" /><input type="email" name="email" placeholder="Email (optional)" maxlength="160" /></div>' +
+      '<button class="btn btn-primary" style="justify-self:start" type="submit">Submit contribution</button>' +
+      "</form></div></div>";
+    $("#contrib-form").onsubmit = function (e) {
+      e.preventDefault();
+      var fd = new FormData(e.target);
+      var body = {};
+      ["commonName", "scientificName", "categorySlug", "region", "details", "contributor", "email"].forEach(function (k) { body[k] = String(fd.get(k) || ""); });
+      fetch("/py/contribute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+        .then(function (r) { if (!r.ok) throw new Error("bad"); return r.json(); })
+        .then(function () {
+          app.innerHTML = '<div class="container page"><div class="panel empty-state" style="max-width:640px;margin:0 auto"><div class="es-emoji">ðŸŒ±</div><h2 class="section-h">Submission received</h2><p class="muted">Thank you â€” your contribution is stored in the editorial queue. Submissions with sources are published fastest.</p><a class="btn btn-primary" href="#/contribute">Submit another</a></div></div>';
+        })
+        .catch(function () { toast("Could not submit", true); });
+    };
+  });
+}
+
+/* ------------------------------------------------------------------ static pages */
+var GLOSSARY = [
+  ["Classification", [["Binomial nomenclature", "The two-part Latin naming system â€” genus then species, e.g. Panthera tigris."], ["Taxon", "Any named group of organisms at any rank, from kingdom to subspecies."], ["Endemic", "Found naturally in one area and nowhere else, like the Southern Birdwing in the Western Ghats."], ["Subspecies", "A geographically distinct population within a species."], ["Cultivar", "A plant variety produced by selective breeding."]]],
+  ["Ecology", [["Keystone species", "A species whose removal would collapse its ecosystem."], ["Apex predator", "A predator with no natural enemies as an adult."], ["Trophic cascade", "A chain reaction through a food web from a top predator."], ["Mutualism", "A relationship where both partners benefit."], ["Biodiversity hotspot", "A region with exceptional endemism under severe threat â€” India has four."]]],
+  ["Behaviour", [["Diurnal", "Active mainly by day."], ["Nocturnal", "Active mainly at night."], ["Crepuscular", "Active at dawn and dusk."], ["Aestivation", "Dormancy through hot or dry periods."], ["Aposematism", "Bright colours advertising toxicity."]]],
+  ["Anatomy", [["Carapace", "The hard upper shell of a turtle or crustacean."], ["Baleen", "Keratin filter plates some whales use to strain krill."], ["Chromatophore", "A pigment cell enabling colour change."], ["Prehensile", "Capable of grasping â€” as in a seahorse's tail."], ["Epiphyte", "A plant growing on another for support, like most orchids."]]],
+  ["Reproduction", [["Gestation", "Development inside the mother before birth."], ["Oviparous", "Egg-laying."], ["Viviparous", "Live-bearing."], ["Metamorphosis", "A radical change of body form during development."], ["Parthenogenesis", "Reproduction from an unfertilised egg."]]],
+  ["Conservation", [["Biopiracy", "Patenting traditional knowledge without consent or benefit sharing."], ["CITES", "The treaty regulating cross-border trade in threatened species."], ["Bycatch", "Non-target animals caught in fishing gear."], ["Habitat fragmentation", "Breaking continuous habitat into isolated patches."], ["De-extinction", "Attempting to recreate an extinct species through genomics."]]]
+];
+
+function renderGlossary() {
+  setTitle("Glossary of scientific terms Â· BioSphere");
+  apiCached("/facets").then(function (facets) {
+    var legend = facets.legend || LEGEND;
+    app.innerHTML = '<div class="container page prose" style="max-width:900px"><h1>Glossary of scientific terms</h1>' +
+      '<p class="muted">Every technical term used across BioSphere, in plain English.</p>' +
+      '<h2>IUCN Red List categories</h2><div class="glossary-grid">' +
+      Object.keys(legend).map(function (code) {
+        var l = legend[code];
+        return '<div class="panel gloss-item" style="display:flex;gap:10px;align-items:flex-start">' + statusBadge(code, true) + "<div><dt><b>" + esc(l.label) + "</b></dt><dd>" + esc(statusDesc(code)) + "</dd></div></div>";
+      }).join("") + "</div>" +
+      GLOSSARY.map(function (grp) {
+        return "<h2>" + grp[0] + "</h2><div class=\"glossary-grid\">" + grp[1].map(function (pair) {
+          return '<dl class="panel gloss-item"><dt>' + esc(pair[0]) + "</dt><dd>" + esc(pair[1]) + "</dd></dl>";
+        }).join("") + "</div>";
+      }).join("") + "</div>";
+  });
+}
+
+var FAQS = [
+  ["Is BioSphere Encyclopedia free?", "Yes â€” no paywall, no accounts, no advertising trackers. Teachers and students can use every feature freely."],
+  ["Where do the photographs come from?", "Images are streamed live from Wikimedia Commons through the Python media proxy, which resizes them and serves them from the same origin to avoid broken or rate-limited images."],
+  ["What stack powers the site?", "A hand-written HTML, CSS and JavaScript frontend; a Python (FastAPI) backend; and a PostgreSQL database â€” with Next.js acting as the static host and reverse proxy."],
+  ["Why Marathi and Hindi names?", "Local names carry generations of ecological knowledge. Use the language switcher in the header to change display names."],
+  ["Can I cite this site in a school project?", "Yes â€” cite the species page URL and access date. For academic work, also follow the GBIF and IUCN links on each profile."],
+  ["How do I report an error?", "Use the Contribute page with the species name and the section to fix. Corrections are prioritised over new species."],
+  ["Will you cover all two million described species?", "Not all at once â€” we publish the most searched and ecologically significant species first, then work outwards. Depth beats breadth."]
+];
+
+function renderFaq() {
+  setTitle("FAQ Â· BioSphere");
+  app.innerHTML = '<div class="container page prose" style="max-width:760px"><h1>Frequently asked questions</h1>' +
+    FAQS.map(function (f) { return '<details class="panel faq-item"><summary>' + esc(f[0]) + "</summary><p>" + esc(f[1]) + "</p></details>"; }).join("") + "</div>";
+}
+
+function renderAbout() {
+  setTitle("About Â· BioSphere");
+  app.innerHTML = '<div class="container page prose" style="max-width:820px">' +
+    '<p class="eyebrow">Our mission</p><h1>A digital natural history museum, open to everyone</h1>' +
+    '<p class="muted">Around two million species have been formally described by science, and researchers estimate between 8 and 20 million more are waiting. BioSphere Encyclopedia makes that diversity understandable â€” one carefully written, beautifully illustrated profile at a time.</p>' +
+    '<h2>The stack behind this page</h2>' +
+    '<div class="grid grid-2">' +
+    [["ðŸ–¥ï¸", "Frontend", "Hand-written HTML, CSS and JavaScript â€” a single-page app with a hash router, lazy image loading, dark mode and full keyboard accessibility."],
+     ["ðŸ", "Backend", "Python with FastAPI serving 18 REST endpoints â€” species search, filters, galleries, quizzes, sightings and contributions."],
+     ["ðŸ˜", "Database", "PostgreSQL stores 179 species profiles, 15 kingdoms, 90 sub-groups, sightings and community contributions."],
+     ["ðŸ§©", "Reverse proxy", "Next.js serves this static frontend at the root and transparently proxies /py/* to the Python service."]].map(function (c) {
+      return '<div class="panel" style="padding:18px"><span style="font-size:30px">' + c[0] + '</span><h3 style="margin:8px 0 4px">' + c[1] + "</h3><p class=\"muted\" style=\"font-size:13.5px;margin:0\">" + c[2] + "</p></div>";
+    }).join("") + "</div>" +
+    "<h2>Principles</h2><ul><li><strong>Accuracy before volume</strong> â€” every profile is written against published sources (IUCN, GBIF, peer review).</li><li><strong>Local names matter</strong> â€” Marathi and Hindi names sit beside the Latin binomial.</li><li><strong>Living media</strong> â€” photos stream from Wikimedia Commons; illustrated plates cover the gaps.</li><li><strong>Accessible to everyone</strong> â€” keyboard support, text scaling, high contrast, text-to-speech.</li><li><strong>Free forever</strong> â€” no paywall, no tracking walls.</li></ul>" +
+    '<div class="hero-cta" style="margin-top:16px"><a class="btn btn-primary" href="#/contribute">Contribute a species</a><a class="btn btn-ghost" href="#/explore">Start exploring</a></div></div>';
+}
+
+var PRIVACY = [
+  ["What we collect", "Almost nothing. No accounts, no tracking cookies. Sighting and contribution forms store only what you type, in PostgreSQL. Preferences and your life list live in your own browser's local storage."],
+  ["Cookies", "None. Preferences use localStorage, which you can clear any time."],
+  ["Third-party media", "Species photographs come from Wikimedia Commons through our own server-side proxy, so your browser does not contact third parties for species images. Hero photography is served by Pexels."],
+  ["User submissions", "Sightings and contributions are published with the name you supply. Never submit anything you would not want public."],
+  ["Accuracy disclaimer", "An educational resource, not a safety manual. Never rely on it alone to judge whether a plant, mushroom or animal is safe to eat or handle."]
+];
+function renderPrivacy() {
+  setTitle("Privacy & terms Â· BioSphere");
+  app.innerHTML = '<div class="container page prose" style="max-width:760px"><h1>Privacy &amp; terms</h1><p class="muted">Short version: we do not want your data, only your curiosity.</p>' +
+    PRIVACY.map(function (s) { return '<section class="panel" style="padding:18px;margin-bottom:12px"><h2 style="margin-top:0">' + esc(s[0]) + '</h2><p class="muted" style="margin:0">' + esc(s[1]) + "</p></section>"; }).join("") + "</div>";
+}
+
+function renderNotFound(what) {
+  setTitle("Not found Â· BioSphere");
+  app.innerHTML = '<div class="container page"><div class="panel empty-state" style="max-width:620px;margin:30px auto">' +
+    '<div class="es-emoji">ðŸ”­</div><h1 class="section-h" style="font-size:30px">Species not found</h1>' +
+    (what ? '<p class="muted">Nothing matches <b>' + esc(what) + '</b>.</p>' : "") +
+    '<p class="muted">This page may have gone extinct â€” around 80% of the world\'s species are still undescribed.</p>' +
+    '<div class="hero-cta" style="justify-content:center"><a class="btn btn-primary" href="#/explore">Explore all species</a><a class="btn btn-ghost" href="#/">Back to home</a></div></div></div>';
+}
+
+/* ------------------------------------------------------------------ router */
+var app = $("#app");
+function setTitle(title) { document.title = title; }
+
+function route() {
+  var h = parseHash();
+  window.scrollTo(0, 0);
+  var seg = h.segs[0] || "";
+  switch (seg) {
+    case "": renderHome(); break;
+    case "explore": renderExplore(h.q); break;
+    case "species": renderSpecies(h.segs[1] ? decodeURIComponent(h.segs[1]) : ""); break;
+    case "category": renderCategory(decodeURIComponent(h.segs[1] || ""), h.q); break;
+    case "map": renderAtlas(h.q); break;
+    case "compare": renderCompare(h.q); break;
+    case "quiz": renderQuiz(); break;
+    case "checklist": renderChecklist(); break;
+    case "contribute": renderContribute(); break;
+    case "glossary": renderGlossary(); break;
+    case "faq": renderFaq(); break;
+    case "about": renderAbout(); break;
+    case "privacy": renderPrivacy(); break;
+    default: renderNotFound(h.segs.join("/"));
+  }
+}
+
+/* ------------------------------------------------------------------ header */
+function initHeader() {
+  var input = $("#search-input"), box = $("#suggest-box"), form = $("#search-form");
+  var searchDo = debounce(function () {
+    var value = input.value.trim();
+    if (value.length < 2) { box.hidden = true; return; }
+    api("/suggest?q=" + encodeURIComponent(value)).then(function (d) {
+      if (!d.items || !d.items.length) { box.hidden = true; return; }
+      box.innerHTML = d.items.map(function (it) {
+        return '<li><a href="#/species/' + it.slug + '"><span class="s-emoji">' + it.emoji + '</span><span><span class="s-name">' +
+          esc(lang() === "mr" && it.name_mr ? it.name_mr : it.common_name) +
+          (it.name_mr && lang() !== "mr" ? ' <span class="muted">' + esc(it.name_mr) + "</span>" : "") +
+          '</span><span class="s-sci">' + esc(it.scientific_name) + "</span></span></a></li>";
+      }).join("");
+      box.hidden = false;
+      $$("a", box).forEach(function (a) { a.onclick = function () { box.hidden = true; input.value = ""; }; });
+    }).catch(function () {});
+  }, 200);
+  input.addEventListener("input", searchDo);
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var v = input.value.trim();
+    if (v) { box.hidden = true; location.hash = buildExploreUrl({ q: v }); }
+  });
+  document.addEventListener("click", function (e) {
+    if (!box.contains(e.target) && e.target !== input) box.hidden = true;
+  });
+  $("#search-form-m").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var v = $("#search-input-m").value.trim();
+    if (v) location.hash = buildExploreUrl({ q: v });
+  });
+
+  // voice search
+  $("#voice-btn").onclick = function () {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast("Voice search not supported here", true); return; }
+    var rec = new SR();
+    rec.lang = "en-IN";
+    this.classList.add("listening");
+    var btn = $("#voice-btn");
+    rec.onresult = function (ev) {
+      input.value = ev.results[0][0].transcript;
+      btn.classList.remove("listening");
+      searchDo();
+    };
+    rec.onerror = rec.onend = function () { btn.classList.remove("listening"); };
+    try { rec.start(); } catch (e) { btn.classList.remove("listening"); }
+  };
+
+  // theme
+  var themeBtn = $("#theme-btn");
+  var syncTheme = function () {
+    var dark = pref("theme", window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") === "dark";
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "");
+    themeBtn.textContent = dark ? "â˜€ï¸" : "ðŸŒ™";
+  };
+  themeBtn.onclick = function () {
+    var now = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    setPref("theme", now); syncTheme();
+  };
+  syncTheme();
+
+  // language
+  $$(".lang-btn").forEach(function (btn) {
+    btn.classList.toggle("active", btn.dataset.lang === lang());
+    btn.onclick = function () {
+      setPref("lang", btn.dataset.lang);
+      $$(".lang-btn").forEach(function (b) { b.classList.toggle("active", b === btn); });
+      var sInput = $("#search-input");
+      sInput.placeholder = t("search");
+      route();
+    };
+  });
+  input.placeholder = t("search");
+
+  // accessibility
+  var a11yBtn = $("#a11y-btn"), a11yPop = $("#a11y-pop");
+  a11yBtn.onclick = function (e) { e.stopPropagation(); a11yPop.hidden = !a11yPop.hidden; };
+  document.addEventListener("click", function (e) { if (!a11yPop.contains(e.target) && e.target !== a11yBtn) a11yPop.hidden = true; });
+  var scale = pref("fontScale", 1);
+  $$(".font-scales button").forEach(function (b) {
+    b.classList.toggle("active", Number(b.dataset.scale) === scale);
+    b.onclick = function () {
+      setPref("fontScale", Number(b.dataset.scale));
+      document.documentElement.style.fontSize = (16 * Number(b.dataset.scale)) + "px";
+      $$(".font-scales button").forEach(function (x) { x.classList.toggle("active", x === b); });
+    };
+  });
+  var contrast = $("#contrast-toggle");
+  contrast.checked = Boolean(pref("contrast", false));
+  contrast.onchange = function () {
+    setPref("contrast", contrast.checked);
+    document.documentElement.classList.toggle("contrast", contrast.checked);
+  };
+
+  // mega menu
+  var megaBtn = $("#mega-btn"), megaMenu = $("#mega-menu");
+  var drawMega = function (cats) {
+    megaMenu.innerHTML = '<div class="mega-grid">' + cats.map(function (c) {
+      return '<a class="mega-cat" href="#/category/' + c.slug + '"><span class="cat-emoji" style="background:linear-gradient(135deg,' + c.accent_from + "," + c.accent_to + ')">' + c.emoji + "</span><span><span class=\"cat-name\">" + esc(c.name) + '</span><span class="cat-meta">' + esc(c.known_species) + " Â· " + (c.species_count || 0) + " profiles</span></span></a>";
+    }).join("") + "</div>";
+    $$("a", megaMenu).forEach(function (a) { a.onclick = function () { megaMenu.hidden = true; megaBtn.setAttribute("aria-expanded", "false"); }; });
+  };
+  apiCached("/categories").then(drawMega).catch(function () {});
+  megaBtn.onclick = function () {
+    megaMenu.hidden = !megaMenu.hidden;
+    megaBtn.setAttribute("aria-expanded", String(!megaMenu.hidden));
+  };
+  $(".has-mega").addEventListener("mouseenter", function () { megaMenu.hidden = false; });
+  $(".has-mega").addEventListener("mouseleave", function () { megaMenu.hidden = true; });
+
+  // mobile menu
+  var menuBtn = $("#menu-btn"), mobileMenu = $("#mobile-menu");
+  menuBtn.onclick = function () { mobileMenu.hidden = !mobileMenu.hidden; menuBtn.textContent = mobileMenu.hidden ? "â˜°" : "âœ•"; };
+  apiCached("/categories").then(function (cats) {
+    $("#mobile-cats").innerHTML = cats.map(function (c) { return '<a href="#/category/' + c.slug + '">' + c.emoji + " " + esc(c.name) + "</a>"; }).join("");
+  }).catch(function () {});
+  mobileMenu.addEventListener("click", function (e) {
+    if (e.target.tagName === "A") { mobileMenu.hidden = true; menuBtn.textContent = "â˜°"; }
+  });
+
+  // footer
+  apiCached("/categories").then(function (cats) {
+    var box = $("#footer-cats");
+    box.innerHTML = '<p class="footer-title">Kingdoms</p>' + cats.slice(0, 8).map(function (c) {
+      return '<a href="#/category/' + c.slug + '">' + c.emoji + " " + esc(c.name) + "</a>";
+    }).join("");
+  }).catch(function () {});
+  $("#footer-copy").textContent = "Â© " + new Date().getFullYear() + " BioSphere Encyclopedia Â· Frontend: HTML + CSS + JS Â· Backend: Python (FastAPI) Â· Database: PostgreSQL Â· Photos: Wikimedia Commons";
+}
+
+/* ------------------------------------------------------------------ boot */
+window.addEventListener("hashchange", route);
+document.addEventListener("DOMContentLoaded", function () {
+  app = $("#app");
+  initHeader();
+  route();
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    // Optional PWA hook â€” registration only if a worker exists.
+  }
+});
+})();
+        return '<div class="panel cmp-card"><div class="sp-img-wrap" data-wiki="' + esc(s.wiki_title || "") + '" data-slug="' + esc(s.slug) + '" data-emoji="' + esc(s.emoji || "") + '" data-alt="' + esc(s.common_name) + '"></div>' +
+          '<div style="padding:12px"><a href="#/species/' + s.slug + '"><b>' + esc(localName(s)) + "</b></a><div style=\"margin-top:6px;display:flex;gap:5px;flex-wrap:wrap\">" + statusBadge(s.conservation, true) + '<span class="pill pill-green">' + esc(s.diet_type) + "</span></div></div></div>";
+      }).join("") + "</div>" +
+      '<div class="panel table-scroll"><table class="cmp-table"><tbody>' +
+      nums.map(function (row) {
+        var max = Math.max.apply(null, selected.map(function (s) { return Number(s[row[1]] || 0); }).concat([1]));
+        return "<tr><th>" + row[0] + "</th>" + selected.map(function (s) {
+          var v = Number(s[row[1]] || 0);
+          return "<td><b>" + (v ? v.toLocaleString() + " " + row[2] : "â€”") + '</b><div class="cmp-bar-track"><div class="cmp-bar" style="width:' + (v / max) * 100 + '%"></div></div></td>';
+        }).join("") + "</tr>";
+      }).join("") +
+      textRows.map(function (row) {
+        return "<tr><th>" + row[0] + "</th>" + selected.map(function (s) { return "<td>" + row[1](s) + "</td>"; }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div>"
+      : '<div class="panel empty-state"><div class="es-emoji">âš–ï¸</div><p>Pick a species to begin comparing.</p></div>') +
+    "</div>";
+
+  $$("#app select[data-slot]").forEach(function (sel) {
+    sel.onchange = function () {
+      var slots = $$("#app select[data-slot]").map(function (x) { return x.value; }).filter(Boolean);
+      var keys = ["a", "b", "c"];
+      var url = "#/compare?" + slots.map(function (v, i) { return keys[i] + "=" + encodeURIComponent(v); }).join("&");
+      location.hash = url;
+    };
+  });
+  $("#cmp-clear").onclick = function () { location.hash = "#/compare"; };
+  lazyImages(app); reveal(app);
+}
+
+/* ------------------------------------------------------------------ quiz */
+function renderQuiz() {
+  setTitle("Identify the species quiz Â· BioSphere");
+  app.innerHTML = '<div class="container page"><div class="quiz-shell"><div class="skeleton" style="height:400px;border-radius:22px"></div></div></div>';
+  api("/quiz?count=8").then(function (d) {
+    var questions = d.questions || [];
+    if (!questions.length) throw new Error("no questions");
+    var state = { i: 0, score: 0, picked: null, hint: false, questions: questions };
+    drawQuiz(state);
+  }).catch(function () {
+    app.innerHTML = '<div class="container page"><div class="panel empty-state quiz-shell"><div class="es-emoji">ðŸ§ </div><p>Could not load the quiz.</p><button class="btn btn-primary" onclick="location.reload()">Retry</button></div></div>';
+  });
+}
+
+function drawQuiz(st) {
+  var qs = st.questions;
+  if (st.i >= qs.length) {
+    var pct = Math.round((st.score / qs.length) * 100);
+    var verdict = pct === 100 ? "Perfect â€” you are a walking field guide!" : pct >= 75 ? "Excellent naturalist instincts." : pct >= 50 ? "Solid effort â€” keep exploring." : "Time for a wander through the encyclopedia!";
+    app.innerHTML = '<div class="container page"><div class="quiz-shell panel" style="padding:40px;text-align:center">' +
+      '<div style="font-size:56px">' + (pct >= 75 ? "ðŸ†" : pct >= 50 ? "ðŸŒ¿" : "ðŸ”") + "</div>" +
+      '<h2 class="section-h" style="font-size:30px">' + st.score + " / " + qs.length + "</h2>" +
+      '<p class="muted">' + verdict + "</p>" +
+      '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px">' +
+      '<button class="btn btn-primary" id="quiz-again">Play again</button><a class="btn btn-ghost" href="#/explore">Browse species</a></div></div></div>';
+    $("#quiz-again").onclick = renderQuiz;
+    return;
+  }
+  var q = qs[st.i];
+  app.innerHTML = '<div class="container page"><div class="quiz-shell panel">' +
+    '<div class="quiz-top"><b>Question ' + (st.i + 1) + " of " + qs.length + "</b><span class=\"muted\">Score: " + st.score + "</span></div>" +
+    '<div class="quiz-progress"><b style="width:' + (st.i / qs.length) * 100 + '%"></b></div>' +
+    '<div class="quiz-img-wrap' + (st.picked ? "" : " blurred") + '" id="quiz-img"></div>' +
+    '<div class="quiz-body">' +
+      (st.hint || st.picked
+        ? '<p class="quiz-hint">ðŸ’¡ ' + esc(q.hint) + (st.picked ? '<span class="sci">' + esc(q.scientificName) + "</span>" : "") + "</p>"
+        : '<button class="section-link" id="quiz-hint" style="background:none;border:0;padding:0">Need a clue?</button>') +
+      '<div class="quiz-opts">' + q.options.map(function (opt) {
+        var cls = "quiz-opt";
+        if (st.picked) {
+          if (opt.slug === q.answer) cls += " correct";
+          else if (opt.slug === st.picked) cls += " wrong";
+        }
+        return '<button class="' + cls + '" data-slug="' + opt.slug + '"' + (st.picked ? " disabled" : "") + ">" + esc(opt.name) + "</button>";
+      }).join("") + "</div>" +
+      (st.picked ? '<div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap"><b>' + (st.picked === q.answer ? "âœ… Correct!" : "âŒ Not quite.") + '</b><a class="section-link" href="#/species/' + q.answer + '">Read the profile</a><button class="btn btn-primary btn-sm" id="quiz-next" style="margin-left:auto">' + (st.i + 1 === qs.length ? "See results" : "Next â†’") + "</button></div>" : "") +
+    "</div></div></div>";
+
+  var imgWrap = $("#quiz-img");
+  if (!st.picked) imgWrap.dataset.mystery = "1";
+  attachImage(imgWrap, q.wikiTitle, q.slug, st.picked ? q.emoji : "â“", "Mystery species");
+
+  if (!st.hint && !st.picked) $("#quiz-hint").onclick = function () { st.hint = true; drawQuiz(st); };
+  $$(".quiz-opt").forEach(function (btn) {
+    btn.onclick = function () {
+      st.picked = btn.dataset.slug;
+      if (st.picked === q.answer) st.score += 1;
+      drawQuiz(st);
+    };
+  });
+  if (st.picked) $("#quiz-next").onclick = function () { st.i += 1; st.picked = null; st.hint = false; drawQuiz(st); };
+}
+
+/* ------------------------------------------------------------------ checklist */
+function renderChecklist() {
+  setTitle("My life list Â· BioSphere");
+  api("/species?perPage=200&sort=az").then(function (d) {
+    var all = d.items || [];
+    var draw = function (query) {
+      var listNow = lifeList();
+      var seen = all.filter(function (s) { return listNow.indexOf(s.slug) > -1; });
+      var qLower = (query || "").toLowerCase();
+      var filtered = qLower ? all.filter(function (s) { return s.common_name.toLowerCase().indexOf(qLower) > -1; }).slice(0, 60) : all.slice(0, 60);
+      var byCat = {};
+      seen.forEach(function (s) { byCat[s.category_slug] = (byCat[s.category_slug] || 0) + 1; });
+      var pct = Math.round((seen.length / Math.max(1, all.length)) * 100);
+      app.innerHTML = '<div class="container page">' +
+        '<p class="eyebrow">Personal tracker</p><h1 class="section-h" style="font-size:clamp(26px,4vw,38px)">My life list</h1>' +
+        '<p class="muted">Tick off everything you have seen in the wild. Stored privately in this browser.</p>' +
+        '<div class="explore-layout"><div>' +
+        '<div class="panel" style="padding:18px;margin-bottom:16px"><div class="life-list-bar"><b>' + seen.length + ' <small style="font-size:14px" class="muted">species logged</small></b><span class="muted">' + pct + "% of the encyclopedia</span></div>" +
+        '<div class="progress"><b style="width:' + Math.max(2, pct) + '%"></b></div></div>' +
+        '<input class="sort-select" id="life-query" style="width:100%;margin-bottom:14px;border-radius:12px" placeholder="Search the encyclopedia to add a speciesâ€¦" value="' + esc(query || "") + '" />' +
+        '<div class="grid grid-2">' + filtered.map(function (s) {
+          var checked = listNow.indexOf(s.slug) > -1;
+          return '<label class="check-row' + (checked ? " checked" : "") + '"><input type="checkbox" data-slug="' + s.slug + '"' + (checked ? " checked" : "") + " /><span>" + s.emoji + "</span><span style=\"flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\">" + esc(s.common_name) + "</span>" + statusBadge(s.conservation, true) + "</label>";
+        }).join("") + "</div></div>" +
+        '<aside><div class="panel sidebar-card"><p class="sc-title">Your list by kingdom</p><ul class="sidebar-facts">' +
+        (draw.cats || []).map(function (c) { return '<li><span class="k">' + c.emoji + " " + esc(c.name) + '</span><span class="v">' + (byCat[c.slug] || 0) + "</span></li>"; }).join("") +
+        "</ul></div></aside></div></div>";
+      $("#life-query").oninput = debounce(function () { draw(this.value); }, 250);
+      $$("#app .check-row input").forEach(function (cb) {
+        cb.onchange = function () {
+          var list = lifeList();
+          var slug = cb.dataset.slug;
+          var next = cb.checked ? list.concat([slug]) : list.filter(function (x) { return x !== slug; });
+          try { localStorage.setItem("biosphere-lifelist", JSON.stringify(next)); } catch (e) {}
+          draw($("#life-query").value);
+        };
+      });
+    };
+    apiCached("/categories").then(function (cats) { draw.cats = cats; draw(""); }).catch(function () { draw.cats = []; draw(""); });
+  }).catch(function () {
+    app.innerHTML = '<div class="container page"><div class="panel empty-state"><div class="es-emoji">âœ…</div><p>Could not load the encyclopedia list.</p></div></div>';
+  });
+}
+
+/* ------------------------------------------------------------------ contribute */
+function renderContribute() {
+  setTitle("Contribute a species Â· BioSphere");
+  apiCached("/categories").then(function (cats) {
+    app.innerHTML = '<div class="container page prose" style="max-width:720px">' +
+      '<p class="eyebrow">Community science</p><h1>Contribute to the encyclopedia</h1>' +
+      '<p class="muted">Spotted a species we have not covered? Know the Marathi, Hindi, Tamil or Bengali name for something? Found an error? This form lands in the PostgreSQL editorial queue.</p>' +
+      '<div class="panel" style="padding:22px;margin-top:20px"><form id="contrib-form" class="form-grid">' +
+      '<div class="grid grid-2"><input name="commonName" required placeholder="Common name *" maxlength="120" /><input name="scientificName" placeholder="Scientific name" maxlength="160" /></div>' +
+      '<div class="grid grid-2"><select name="categorySlug">' +
+        '<option value="">Kingdom / group (optional)</option>' + cats.map(function (c) { return '<option value="' + c.slug + '">' + c.emoji + " " + esc(c.name) + "</option>"; }).join("") + "</select>" +
+      '<input name="region" placeholder="Region / where found" maxlength="120" /></div>' +
+      '<textarea name="details" rows="6" placeholder="Describe the species, local-language names, or the correction. Include sources if you have them." maxlength="4000"></textarea>' +
+      '<div class="grid grid-2"><input name="contributor" placeholder="Your name (optional)" maxlength="80" /><input type="email" name="email" placeholder="Email (optional)" maxlength="160" /></div>' +
+      '<button class="btn btn-primary" style="justify-self:start" type="submit">Submit contribution</button>' +
+      "</form></div></div>";
+    $("#contrib-form").onsubmit = function (e) {
+      e.preventDefault();
+      var fd = new FormData(e.target);
+      var body = {};
+      ["commonName", "scientificName", "categorySlug", "region", "details", "contributor", "email"].forEach(function (k) { body[k] = String(fd.get(k) || ""); });
+      fetch("/py/contribute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+        .then(function (r) { if (!r.ok) throw new Error("bad"); return r.json(); })
+        .then(function () {
+          app.innerHTML = '<div class="container page"><div class="panel empty-state" style="max-width:640px;margin:0 auto"><div class="es-emoji">ðŸŒ±</div><h2 class="section-h">Submission received</h2><p class="muted">Thank you â€” your contribution is stored in the editorial queue. Submissions with sources are published fastest.</p><a class="btn btn-primary" href="#/contribute">Submit another</a></div></div>';
+        })
+        .catch(function () { toast("Could not submit", true); });
+    };
+  });
+}
+
+/* ------------------------------------------------------------------ static pages */
+var GLOSSARY = [
+  ["Classification", [["Binomial nomenclature", "The two-part Latin naming system â€” genus then species, e.g. Panthera tigris."], ["Taxon", "Any named group of organisms at any rank, from kingdom to subspecies."], ["Endemic", "Found naturally in one area and nowhere else, like the Southern Birdwing in the Western Ghats."], ["Subspecies", "A geographically distinct population within a species."], ["Cultivar", "A plant variety produced by selective breeding."]]],
+  ["Ecology", [["Keystone species", "A species whose removal would collapse its ecosystem."], ["Apex predator", "A predator with no natural enemies as an adult."], ["Trophic cascade", "A chain reaction through a food web from a top predator."], ["Mutualism", "A relationship where both partners benefit."], ["Biodiversity hotspot", "A region with exceptional endemism under severe threat â€” India has four."]]],
+  ["Behaviour", [["Diurnal", "Active mainly by day."], ["Nocturnal", "Active mainly at night."], ["Crepuscular", "Active at dawn and dusk."], ["Aestivation", "Dormancy through hot or dry periods."], ["Aposematism", "Bright colours advertising toxicity."]]],
+  ["Anatomy", [["Carapace", "The hard upper shell of a turtle or crustacean."], ["Baleen", "Keratin filter plates some whales use to strain krill."], ["Chromatophore", "A pigment cell enabling colour change."], ["Prehensile", "Capable of grasping â€” as in a seahorse's tail."], ["Epiphyte", "A plant growing on another for support, like most orchids."]]],
+  ["Reproduction", [["Gestation", "Development inside the mother before birth."], ["Oviparous", "Egg-laying."], ["Viviparous", "Live-bearing."], ["Metamorphosis", "A radical change of body form during development."], ["Parthenogenesis", "Reproduction from an unfertilised egg."]]],
+  ["Conservation", [["Biopiracy", "Patenting traditional knowledge without consent or benefit sharing."], ["CITES", "The treaty regulating cross-border trade in threatened species."], ["Bycatch", "Non-target animals caught in fishing gear."], ["Habitat fragmentation", "Breaking continuous habitat into isolated patches."], ["De-extinction", "Attempting to recreate an extinct species through genomics."]]]
+];
+
+function renderGlossary() {
+  setTitle("Glossary of scientific terms Â· BioSphere");
+  apiCached("/facets").then(function (facets) {
+    var legend = facets.legend || LEGEND;
+    app.innerHTML = '<div class="container page prose" style="max-width:900px"><h1>Glossary of scientific terms</h1>' +
+      '<p class="muted">Every technical term used across BioSphere, in plain English.</p>' +
+      '<h2>IUCN Red List categories</h2><div class="glossary-grid">' +
+      Object.keys(legend).map(function (code) {
+        var l = legend[code];
+        return '<div class="panel gloss-item" style="display:flex;gap:10px;align-items:flex-start">' + statusBadge(code, true) + "<div><dt><b>" + esc(l.label) + "</b></dt><dd>" + esc(statusDesc(code)) + "</dd></div></div>";
+      }).join("") + "</div>" +
+      GLOSSARY.map(function (grp) {
+        return "<h2>" + grp[0] + "</h2><div class=\"glossary-grid\">" + grp[1].map(function (pair) {
+          return '<dl class="panel gloss-item"><dt>' + esc(pair[0]) + "</dt><dd>" + esc(pair[1]) + "</dd></dl>";
+        }).join("") + "</div>";
+      }).join("") + "</div>";
+  });
+}
+
+var FAQS = [
+  ["Is BioSphere Encyclopedia free?", "Yes â€” no paywall, no accounts, no advertising trackers. Teachers and students can use every feature freely."],
+  ["Where do the photographs come from?", "Images are streamed live from Wikimedia Commons through the Python media proxy, which resizes them and serves them from the same origin to avoid broken or rate-limited images."],
+  ["What stack powers the site?", "A hand-written HTML, CSS and JavaScript frontend; a Python (FastAPI) backend; and a PostgreSQL database â€” with Next.js acting as the static host and reverse proxy."],
+  ["Why Marathi and Hindi names?", "Local names carry generations of ecological knowledge. Use the language switcher in the header to change display names."],
+  ["Can I cite this site in a school project?", "Yes â€” cite the species page URL and access date. For academic work, also follow the GBIF and IUCN links on each profile."],
+  ["How do I report an error?", "Use the Contribute page with the species name and the section to fix. Corrections are prioritised over new species."],
+  ["Will you cover all two million described species?", "Not all at once â€” we publish the most searched and ecologically significant species first, then work outwards. Depth beats breadth."]
+];
+
+function renderFaq() {
+  setTitle("FAQ Â· BioSphere");
+  app.innerHTML = '<div class="container page prose" style="max-width:760px"><h1>Frequently asked questions</h1>' +
+    FAQS.map(function (f) { return '<details class="panel faq-item"><summary>' + esc(f[0]) + "</summary><p>" + esc(f[1]) + "</p></details>"; }).join("") + "</div>";
+}
+
+function renderAbout() {
+  setTitle("About Â· BioSphere");
+  app.innerHTML = '<div class="container page prose" style="max-width:820px">' +
+    '<p class="eyebrow">Our mission</p><h1>A digital natural history museum, open to everyone</h1>' +
+    '<p class="muted">Around two million species have been formally described by science, and researchers estimate between 8 and 20 million more are waiting. BioSphere Encyclopedia makes that diversity understandable â€” one carefully written, beautifully illustrated profile at a time.</p>' +
+    '<h2>The stack behind this page</h2>' +
+    '<div class="grid grid-2">' +
+    [["ðŸ–¥ï¸", "Frontend", "Hand-written HTML, CSS and JavaScript â€” a single-page app with a hash router, lazy image loading, dark mode and full keyboard accessibility."],
+     ["ðŸ", "Backend", "Python with FastAPI serving 18 REST endpoints â€” species search, filters, galleries, quizzes, sightings and contributions."],
+     ["ðŸ˜", "Database", "PostgreSQL stores 179 species profiles, 15 kingdoms, 90 sub-groups, sightings and community contributions."],
+     ["ðŸ§©", "Reverse proxy", "Next.js serves this static frontend at the root and transparently proxies /py/* to the Python service."]].map(function (c) {
+      return '<div class="panel" style="padding:18px"><span style="font-size:30px">' + c[0] + '</span><h3 style="margin:8px 0 4px">' + c[1] + "</h3><p class=\"muted\" style=\"font-size:13.5px;margin:0\">" + c[2] + "</p></div>";
+    }).join("") + "</div>" +
+    "<h2>Principles</h2><ul><li><strong>Accuracy before volume</strong> â€” every profile is written against published sources (IUCN, GBIF, peer review).</li><li><strong>Local names matter</strong> â€” Marathi and Hindi names sit beside the Latin binomial.</li><li><strong>Living media</strong> â€” photos stream from Wikimedia Commons; illustrated plates cover the gaps.</li><li><strong>Accessible to everyone</strong> â€” keyboard support, text scaling, high contrast, text-to-speech.</li><li><strong>Free forever</strong> â€” no paywall, no tracking walls.</li></ul>" +
+    '<div class="hero-cta" style="margin-top:16px"><a class="btn btn-primary" href="#/contribute">Contribute a species</a><a class="btn btn-ghost" href="#/explore">Start exploring</a></div></div>';
+}
+
+var PRIVACY = [
+  ["What we collect", "Almost nothing. No accounts, no tracking cookies. Sighting and contribution forms store only what you type, in PostgreSQL. Preferences and your life list live in your own browser's local storage."],
+  ["Cookies", "None. Preferences use localStorage, which you can clear any time."],
+  ["Third-party media", "Species photographs come from Wikimedia Commons through our own server-side proxy, so your browser does not contact third parties for species images. Hero photography is served by Pexels."],
+  ["User submissions", "Sightings and contributions are published with the name you supply. Never submit anything you would not want public."],
+  ["Accuracy disclaimer", "An educational resource, not a safety manual. Never rely on it alone to judge whether a plant, mushroom or animal is safe to eat or handle."]
+];
+function renderPrivacy() {
+  setTitle("Privacy & terms Â· BioSphere");
+  app.innerHTML = '<div class="container page prose" style="max-width:760px"><h1>Privacy &amp; terms</h1><p class="muted">Short version: we do not want your data, only your curiosity.</p>' +
+    PRIVACY.map(function (s) { return '<section class="panel" style="padding:18px;margin-bottom:12px"><h2 style="margin-top:0">' + esc(s[0]) + '</h2><p class="muted" style="margin:0">' + esc(s[1]) + "</p></section>"; }).join("") + "</div>";
+}
+
+function renderNotFound(what) {
+  setTitle("Not found Â· BioSphere");
+  app.innerHTML = '<div class="container page"><div class="panel empty-state" style="max-width:620px;margin:30px auto">' +
+    '<div class="es-emoji">ðŸ”­</div><h1 class="section-h" style="font-size:30px">Species not found</h1>' +
+    (what ? '<p class="muted">Nothing matches <b>' + esc(what) + '</b>.</p>' : "") +
+    '<p class="muted">This page may have gone extinct â€” around 80% of the world\'s species are still undescribed.</p>' +
+    '<div class="hero-cta" style="justify-content:center"><a class="btn btn-primary" href="#/explore">Explore all species</a><a class="btn btn-ghost" href="#/">Back to home</a></div></div></div>';
+}
+
+/* ------------------------------------------------------------------ router */
+var app = $("#app");
+function setTitle(title) { document.title = title; }
+
+function route() {
+  var h = parseHash();
+  window.scrollTo(0, 0);
+  var seg = h.segs[0] || "";
+  switch (seg) {
+    case "": renderHome(); break;
+    case "explore": renderExplore(h.q); break;
+    case "species": renderSpecies(h.segs[1] ? decodeURIComponent(h.segs[1]) : ""); break;
+    case "category": renderCategory(decodeURIComponent(h.segs[1] || ""), h.q); break;
+    case "map": renderAtlas(h.q); break;
+    case "compare": renderCompare(h.q); break;
+    case "quiz": renderQuiz(); break;
+    case "checklist": renderChecklist(); break;
+    case "contribute": renderContribute(); break;
+    case "glossary": renderGlossary(); break;
+    case "faq": renderFaq(); break;
+    case "about": renderAbout(); break;
+    case "privacy": renderPrivacy(); break;
+    default: renderNotFound(h.segs.join("/"));
+  }
+}
+
+/* ------------------------------------------------------------------ header */
+function initHeader() {
+  var input = $("#search-input"), box = $("#suggest-box"), form = $("#search-form");
+  var searchDo = debounce(function () {
+    var value = input.value.trim();
+    if (value.length < 2) { box.hidden = true; return; }
+    api("/suggest?q=" + encodeURIComponent(value)).then(function (d) {
+      if (!d.items || !d.items.length) { box.hidden = true; return; }
+      box.innerHTML = d.items.map(function (it) {
+        return '<li><a href="#/species/' + it.slug + '"><span class="s-emoji">' + it.emoji + '</span><span><span class="s-name">' +
+          esc(lang() === "mr" && it.name_mr ? it.name_mr : it.common_name) +
+          (it.name_mr && lang() !== "mr" ? ' <span class="muted">' + esc(it.name_mr) + "</span>" : "") +
+          '</span><span class="s-sci">' + esc(it.scientific_name) + "</span></span></a></li>";
+      }).join("");
+      box.hidden = false;
+      $$("a", box).forEach(function (a) { a.onclick = function () { box.hidden = true; input.value = ""; }; });
+    }).catch(function () {});
+  }, 200);
+  input.addEventListener("input", searchDo);
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var v = input.value.trim();
+    if (v) { box.hidden = true; location.hash = buildExploreUrl({ q: v }); }
+  });
+  document.addEventListener("click", function (e) {
+    if (!box.contains(e.target) && e.target !== input) box.hidden = true;
+  });
+  $("#search-form-m").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var v = $("#search-input-m").value.trim();
+    if (v) location.hash = buildExploreUrl({ q: v });
+  });
+
+  // voice search
+  $("#voice-btn").onclick = function () {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast("Voice search not supported here", true); return; }
+    var rec = new SR();
+    rec.lang = "en-IN";
+    this.classList.add("listening");
+    var btn = $("#voice-btn");
+    rec.onresult = function (ev) {
+      input.value = ev.results[0][0].transcript;
+      btn.classList.remove("listening");
+      searchDo();
+    };
+    rec.onerror = rec.onend = function () { btn.classList.remove("listening"); };
+    try { rec.start(); } catch (e) { btn.classList.remove("listening"); }
+  };
+
+  // theme
+  var themeBtn = $("#theme-btn");
+  var syncTheme = function () {
+    var dark = pref("theme", window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") === "dark";
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "");
+    themeBtn.textContent = dark ? "â˜€ï¸" : "ðŸŒ™";
+  };
+  themeBtn.onclick = function () {
+    var now = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    setPref("theme", now); syncTheme();
+  };
+  syncTheme();
+
+  // language
+  $$(".lang-btn").forEach(function (btn) {
+    btn.classList.toggle("active", btn.dataset.lang === lang());
+    btn.onclick = function () {
+      setPref("lang", btn.dataset.lang);
+      $$(".lang-btn").forEach(function (b) { b.classList.toggle("active", b === btn); });
+      var sInput = $("#search-input");
+      sInput.placeholder = t("search");
+      route();
+    };
+  });
+  input.placeholder = t("search");
+
+  // accessibility
+  var a11yBtn = $("#a11y-btn"), a11yPop = $("#a11y-pop");
+  a11yBtn.onclick = function (e) { e.stopPropagation(); a11yPop.hidden = !a11yPop.hidden; };
+  document.addEventListener("click", function (e) { if (!a11yPop.contains(e.target) && e.target !== a11yBtn) a11yPop.hidden = true; });
+  var scale = pref("fontScale", 1);
+  $$(".font-scales button").forEach(function (b) {
+    b.classList.toggle("active", Number(b.dataset.scale) === scale);
+    b.onclick = function () {
+      setPref("fontScale", Number(b.dataset.scale));
+      document.documentElement.style.fontSize = (16 * Number(b.dataset.scale)) + "px";
+      $$(".font-scales button").forEach(function (x) { x.classList.toggle("active", x === b); });
+    };
+  });
+  var contrast = $("#contrast-toggle");
+  contrast.checked = Boolean(pref("contrast", false));
+  contrast.onchange = function () {
+    setPref("contrast", contrast.checked);
+    document.documentElement.classList.toggle("contrast", contrast.checked);
+  };
+
+  // mega menu
+  var megaBtn = $("#mega-btn"), megaMenu = $("#mega-menu");
+  var drawMega = function (cats) {
+    megaMenu.innerHTML = '<div class="mega-grid">' + cats.map(function (c) {
+      return '<a class="mega-cat" href="#/category/' + c.slug + '"><span class="cat-emoji" style="background:linear-gradient(135deg,' + c.accent_from + "," + c.accent_to + ')">' + c.emoji + "</span><span><span class=\"cat-name\">" + esc(c.name) + '</span><span class="cat-meta">' + esc(c.known_species) + " Â· " + (c.species_count || 0) + " profiles</span></span></a>";
+    }).join("") + "</div>";
+    $$("a", megaMenu).forEach(function (a) { a.onclick = function () { megaMenu.hidden = true; megaBtn.setAttribute("aria-expanded", "false"); }; });
+  };
+  apiCached("/categories").then(drawMega).catch(function () {});
+  megaBtn.onclick = function () {
+    megaMenu.hidden = !megaMenu.hidden;
+    megaBtn.setAttribute("aria-expanded", String(!megaMenu.hidden));
+  };
+  $(".has-mega").addEventListener("mouseenter", function () { megaMenu.hidden = false; });
+  $(".has-mega").addEventListener("mouseleave", function () { megaMenu.hidden = true; });
+
+  // mobile menu
+  var menuBtn = $("#menu-btn"), mobileMenu = $("#mobile-menu");
+  menuBtn.onclick = function () { mobileMenu.hidden = !mobileMenu.hidden; menuBtn.textContent = mobileMenu.hidden ? "â˜°" : "âœ•"; };
+  apiCached("/categories").then(function (cats) {
+    $("#mobile-cats").innerHTML = cats.map(function (c) { return '<a href="#/category/' + c.slug + '">' + c.emoji + " " + esc(c.name) + "</a>"; }).join("");
+  }).catch(function () {});
+  mobileMenu.addEventListener("click", function (e) {
+    if (e.target.tagName === "A") { mobileMenu.hidden = true; menuBtn.textContent = "â˜°"; }
+  });
+
+  // footer
+  apiCached("/categories").then(function (cats) {
+    var box = $("#footer-cats");
+    box.innerHTML = '<p class="footer-title">Kingdoms</p>' + cats.slice(0, 8).map(function (c) {
+      return '<a href="#/category/' + c.slug + '">' + c.emoji + " " + esc(c.name) + "</a>";
+    }).join("");
+  }).catch(function () {});
+  $("#footer-copy").textContent = "Â© " + new Date().getFullYear() + " BioSphere Encyclopedia Â· Frontend: HTML + CSS + JS Â· Backend: Python (FastAPI) Â· Database: PostgreSQL Â· Photos: Wikimedia Commons";
+}
+
+/* ------------------------------------------------------------------ boot */
+window.addEventListener("hashchange", route);
+document.addEventListener("DOMContentLoaded", function () {
+  app = $("#app");
+  initHeader();
+  route();
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    // Optional PWA hook â€” registration only if a worker exists.
+  }
+});
+})();
