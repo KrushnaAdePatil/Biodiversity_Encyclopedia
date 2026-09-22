@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+venv/
+env/
+__pycache__/
+
+# Next.js build output
+.next/
+out/
+build/
+
+# Local env files
+.env*.local
+.env
+.env.development
+.env.test
+.env.production
+
+# Version control
+.git/
+.gitignore
+
+# Project resources
+extracted_content/
+biodiversity-encyclopedia-website-development.zip
+*.log
